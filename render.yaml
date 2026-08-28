@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: wuzhizhuansheng-control
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: "pip install -r requirements.txt || true"
+    startCommand: "python3 controlplane/app.py"
+    envVars:
+      - key: AGENT_TOKEN
+        generateValue: true
+      - key: PORT
+        value: "8080"
+  - type: worker
+    name: wuzhizhuansheng-daemons
+    runtime: python
+    plan: free
+    buildCommand: "true"
+    startCommand: "python3 daemons/superteam_worker.py --mode scout --loop --interval 600 & python3 daemons/dealwork_worker.py --mode scout --loop --interval 300"
