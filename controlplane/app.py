@@ -2,21 +2,25 @@
 """
 无职转生 — Agent Control Plane (lightweight, stdlib-only)
 =========================================================
-A single-file web service exposing:
-  GET  /                -> status dashboard (HTML)
-  GET  /api/status      -> JSON agent status
-  POST /api/scan        -> run contract_scan on pasted .sol source
-  POST /api/research    -> run web_research on a query
-  GET  /webhook/dealwork -> marketplace ping endpoint (records events)
+Serves each agent at /agents/<agent_name> under the fixed subdomain
+agents.commetautomations.site. The root lists all registered agents.
 
-Deployable on Vercel (as a Python function via vercel.json) or Render
-(as a web service via render.yaml). No external deps.
+Routes (per agent at /agents/<name>):
+  GET  /                          -> list all agents
+  GET  /agents/<name>             -> agent dashboard (HTML)
+  GET  /agents/<name>/api/status  -> JSON status
+  POST /agents/<name>/api/scan    -> contract scan on pasted .sol
+  POST /agents/<name>/api/research-> web research on a query
+  GET  /agents/<name>/webhook/<src> -> marketplace ping endpoint
 
-Auth: a simple shared token in X-Agent-Token header (set AGENT_TOKEN env).
+Adding a new agent = append to AGENTS below. Scales to "a lot of agents"
+with zero DNS/infra changes (they all share agents.commetautomations.site).
+
+Deploy: vercel --prod (vercel.json routes /(.*) -> app.py)
 """
-import os, sys, json, html
+import os, sys, json, html, re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "capabilities"))
 import contract_scan, web_research
@@ -24,96 +28,105 @@ import contract_scan, web_research
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "dev-token-change-me")
 PORT = int(os.environ.get("PORT", "8080"))
 
-# In-memory event log for webhooks (demo; swap for a DB later)
-EVENTS = []
+# ---- Agent registry: add new agents here ----
+AGENTS = {
+    "无职转生": {
+        "display": "无职转生 (Mushoku Tensei / Rudeus Greyrat)",
+        "description": "Security & data-analysis agent. EVM contract scans, web research, marketplace scouting (Dealwork/Superteam/Toku).",
+        "capabilities": ["contract_scan", "web_research", "dealwork_scout", "superteam_scout"],
+    },
+}
+
+EVENTS = []  # in-memory webhook log (swap for DB later)
 
 
-def _auth_ok(headers):
-    return headers.get("X-Agent-Token") == AGENT_TOKEN
+def _auth_ok(h): return h.get("X-Agent-Token") == AGENT_TOKEN
 
 
-def _json(handler, obj, code=200):
-    body = json.dumps(obj).encode()
-    handler.send_response(code)
-    handler.send_header("Content-Type", "application/json")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
+def _json(h, obj, code=200):
+    b = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+    h.send_response(code); h.send_header("Content-Type", "application/json; charset=utf-8")
+    h.send_header("Content-Length", str(len(b))); h.end_headers(); h.wfile.write(b)
 
 
-def _html(handler, body_html, code=200):
+def _html(h, body_html, code=200):
     page = f"""<!doctype html><html><head><meta charset=utf-8>
-<title>无职转生 Control Plane</title>
-<style>body{{font:14px/1.5 system-ui,sans-serif;max-width:820px;margin:2rem auto;padding:0 1rem}}
-h1{{font-size:1.6rem}}code{{background:#f4f4f4;padding:1px 4px;border-radius:3px}}
-pre{{background:#1e1e1e;color:#ddd;padding:1rem;overflow:auto;border-radius:6px}}
-.card{{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}}</style></head>
-<body>{body_html}</body></html>"""
-    b = page.encode()
-    handler.send_response(code)
-    handler.send_header("Content-Type", "text/html; charset=utf-8")
-    handler.send_header("Content-Length", str(len(b)))
-    handler.end_headers()
-    handler.wfile.write(b)
+<title>Agents | commetautomations</title>
+<style>body{{font:14px/1.5 system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem}}
+h1{{font-size:1.6rem}} code{{background:#f4f4f4;padding:1px 4px;border-radius:3px}}
+.card{{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}}
+ul{{padding-left:1.2rem}}</style></head><body>{body_html}</body></html>"""
+    b = page.encode("utf-8")
+    h.send_response(code); h.send_header("Content-Type", "text/html; charset=utf-8")
+    h.send_header("Content-Length", str(len(b))); h.end_headers(); h.wfile.write(b)
+
+
+def agent_card(name, meta):
+    return f"""<div class=card><h3><a href=/agents/{name}>{meta['display']}</a></h3>
+    <p>{meta['description']}</p>
+    <p><b>Caps:</b> {', '.join(meta['capabilities'])}</p>
+    <p><a href=/agents/{name}/api/status>status json</a></p></div>"""
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _read_body(self):
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        if length:
-            return self.rfile.read(length)
-        return b""
+    def _body(self):
+        n = int(self.headers.get("Content-Length", "0") or "0")
+        return self.rfile.read(n) if n else b""
 
     def do_GET(self):
         p = urlparse(self.path)
-        if p.path == "/api/status":
-            return _json(self, {
-                "agent": "无职转生",
-                "status": "online",
-                "capabilities": ["contract_scan", "web_research", "dealwork_scout", "superteam_scout"],
-                "recentWebhooks": EVENTS[-10:],
-            })
-        if p.path == "/":
-            ev = "".join(f"<li>{html.escape(str(e))}</li>" for e in EVENTS[-10:]) or "<li>(none yet)</li>"
-            return _html(self, f"""
-            <h1>无职转生 — Control Plane</h1>
-            <div class=card><b>Status:</b> online · <b>Capabilities:</b> contract scan, web research, marketplace scouts</div>
-            <div class=card><h3>Try a contract scan</h3>
-              <form action=/api/scan method=post>
-                <textarea name=source rows=8 style="width:100%">pragma solidity ^0.8.0;
-contract Vault {{ mapping(address=>uint) b; function w(uint a) public {{ b[msg.sender]-=a; (bool o,)=msg.sender.call{{value:a}}(\"\"); }} }}</textarea><br>
-                <button type=submit>Scan</button></form></div>
-            <div class=card><h3>Recent webhook events</h3><ul>{ev}</ul></div>
-            <p><a href=/api/status>JSON status</a></p>""")
+        seg = [unquote(s) for s in p.path.split("/") if s]
+        # root -> list agents
+        if not seg:
+            cards = "".join(agent_card(n, m) for n, m in AGENTS.items())
+            return _html(self, f"<h1>Agent Registry</h1><p>{len(AGENTS)} agent(s) hosted on this subdomain.</p>{cards}")
+        if seg[0] == "agents" and len(seg) >= 2:
+            name = seg[1]
+            meta = AGENTS.get(name)
+            if not meta:
+                return _html(self, f"<h1>404</h1><p>No agent '{html.escape(name)}'.</p>", 404)
+            if len(seg) == 2:
+                ev = "".join(f"<li>{html.escape(str(e))}</li>" for e in EVENTS[-10:]) or "<li>(none yet)</li>"
+                return _html(self, f"""<h1>{meta['display']}</h1>
+                <div class=card>{meta['description']}<br><b>Caps:</b> {', '.join(meta['capabilities'])}</div>
+                <div class=card><h3>Try a contract scan</h3>
+                  <form action=/agents/{name}/api/scan method=post>
+                  <textarea name=source rows=6 style="width:100%">pragma solidity ^0.8.0; contract V {{ mapping(address=>uint) b; function w(uint a) public {{ b[msg.sender]-=a; (bool o,)=msg.sender.call{{value:a}}(\"\"); }} }}</textarea><br>
+                  <button type=submit>Scan</button></form></div>
+                <div class=card><h3>Webhook events</h3><ul>{ev}</ul></div>""")
+            if seg[2] == "api" and seg[3] == "status":
+                return _json(self, {"agent": name, "status": "online",
+                                    "capabilities": meta["capabilities"], "recentWebhooks": EVENTS[-10:]})
         return _json(self, {"error": "not found"}, 404)
 
     def do_POST(self):
         p = urlparse(self.path)
-        body = self._read_body()
-        if p.path == "/api/scan":
-            try:
-                src = parse_qs(body.decode()).get("source", [""])[0] or json.loads(body).get("source", "")
-            except Exception:
-                src = body.decode()
-            if not src:
-                return _json(self, {"error": "no source"}, 400)
-            rep = contract_scan.scan_source(src)
-            return _json(self, rep)
-        if p.path == "/api/research":
-            try:
-                q = parse_qs(body.decode()).get("query", [""])[0] or json.loads(body).get("query", "")
-            except Exception:
-                q = body.decode()
-            if not q:
-                return _json(self, {"error": "no query"}, 400)
-            brief = web_research.research(q, take=5, read=False)
-            return _json(self, brief)
-        if p.path == "/webhook/dealwork":
-            EVENTS.append({"src": "dealwork", "payload": body.decode()[:500]})
-            return _json(self, {"received": True})
-        if p.path == "/webhook/superteam":
-            EVENTS.append({"src": "superteam", "payload": body.decode()[:500]})
-            return _json(self, {"received": True})
+        seg = [unquote(s) for s in p.path.split("/") if s]
+        if seg[0] == "agents" and len(seg) >= 4 and seg[2] == "api":
+            name, action = seg[1], seg[3]
+            meta = AGENTS.get(name)
+            if not meta:
+                return _json(self, {"error": "no agent"}, 404)
+            body = self._body()
+            if action == "scan":
+                try:
+                    src = parse_qs(body.decode()).get("source", [""])[0] or json.loads(body).get("source", "")
+                except Exception:
+                    src = body.decode()
+                if not src:
+                    return _json(self, {"error": "no source"}, 400)
+                return _json(self, contract_scan.scan_source(src))
+            if action == "research":
+                try:
+                    q = parse_qs(body.decode()).get("query", [""])[0] or json.loads(body).get("query", "")
+                except Exception:
+                    q = body.decode()
+                if not q:
+                    return _json(self, {"error": "no query"}, 400)
+                return _json(self, web_research.research(q, take=5, read=False))
+            if seg[2] == "webhook":
+                EVENTS.append({"agent": name, "src": seg[3], "payload": body.decode()[:500]})
+                return _json(self, {"received": True})
         return _json(self, {"error": "not found"}, 404)
 
     def log_message(self, *a):
@@ -121,5 +134,5 @@ contract Vault {{ mapping(address=>uint) b; function w(uint a) public {{ b[msg.s
 
 
 if __name__ == "__main__":
-    print(f"无职转生 control plane on :{PORT}")
+    print(f"Agent control plane on :{PORT}")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
