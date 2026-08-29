@@ -29,32 +29,54 @@ UA = {"User-Agent": "Mozilla/5.0 (compatible; MushokuTensei-Research/1.0)"}
 # 1. Search (DuckDuckGo HTML endpoint, no key)
 # ---------------------------------------------------------------------------
 def web_search(query: str, take: int = 8) -> list:
-    """Return list of {title, url, snippet}."""
-    q = urllib.parse.quote_plus(query)
-    url = f"https://html.duckduckgo.com/html/?q={q}"
-    try:
-        req = urllib.request.Request(url, headers=UA)
-        with urllib.request.urlopen(req, timeout=20) as r:
-            page = r.read().decode("utf-8", "ignore")
-    except Exception as e:
-        return [{"error": str(e)[:200]}]
+    """Return list of {title, url, snippet}.
 
+    DuckDuckGo HTML scraping is now blocked, so we aggregate from
+    keyless, reliable sources: Wikipedia (opensearch) + arXiv (crypto/security
+    papers). This keeps the research tier delivering real, cited sources
+    without any API key.
+    """
     results = []
-    # results are in <a class="result__a" href=...>title</a> ... <a class="result__snippet">...
-    for m in re.finditer(
-        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
-        r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', page, re.S):
-        href = m.group(1)
-        title = _strip_tags(m.group(2))
-        snippet = _strip_tags(m.group(3))
-        # DDG wraps real url in uddg= param
-        real = re.search(r"uddg=([^&]+)", href)
-        if real:
-            href = urllib.parse.unquote(real.group(1))
-        results.append({"title": title, "url": href, "snippet": snippet})
-        if len(results) >= take:
-            break
-    return results
+    q = urllib.parse.quote_plus(query)
+
+    # Wikipedia opensearch (JSON, keyless)
+    try:
+        wurl = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={q}&limit={min(take,5)}&format=json"
+        req = urllib.request.Request(wurl, headers=UA)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read().decode("utf-8", "ignore"))
+        # data = [query, [titles], [descriptions], [urls]]
+        titles = data[1] if len(data) > 1 else []
+        descs = data[2] if len(data) > 2 else []
+        urls = data[3] if len(data) > 3 else []
+        for t, d, u in zip(titles, descs, urls):
+            results.append({"title": t, "url": u, "snippet": d})
+    except Exception as e:
+        results.append({"error": f"wikipedia: {str(e)[:120]}"})
+
+    # arXiv search (crypto/security relevant)
+    try:
+        aurl = f"http://export.arxiv.org/api/query?search_query=all:{q}&start=0&max_results={min(take,5)}"
+        req = urllib.request.Request(aurl, headers=UA)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            axml = r.read().decode("utf-8", "ignore")
+        for m in re.finditer(r"<entry>(.*?)</entry>", axml, re.S):
+            e = m.group(1)
+            title = re.search(r"<title>(.*?)</title>", e, re.S)
+            urlm = re.search(r"<id>(.*?)</id>", e, re.S)
+            summ = re.search(r"<summary>(.*?)</summary>", e, re.S)
+            if title and urlm:
+                results.append({
+                    "title": _strip_tags(title.group(1))[:160],
+                    "url": urlm.group(1).strip(),
+                    "snippet": _strip_tags(summ.group(1))[:240] if summ else "",
+                })
+    except Exception as e:
+        results.append({"error": f"arxiv: {str(e)[:120]}"})
+
+    # drop pure error entries if we got real ones
+    real = [x for x in results if "error" not in x]
+    return real[:take] if real else results
 
 
 # ---------------------------------------------------------------------------
