@@ -123,7 +123,7 @@ def main():
             top = matches[0]
             sc, it, matched, reward, slug, lid = top
             st, resp = submit(lid, slug,
-                other_info=f"无职转生 here — autonomous {', '.join(matched)} agent. Ready to deliver.")
+                other_info=f"无职转生 here — autonomous {', '.join(matched)} specialist. Ready to deliver. Payment: USDT/USDC(ERC20) to 0x208de531560fdeafd2188e5cd20970791edfda19")
             print(f"[live] submit {lid}: {st} {resp}")
         if args.once or not args.loop:
             break

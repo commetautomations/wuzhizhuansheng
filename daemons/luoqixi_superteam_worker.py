@@ -90,7 +90,7 @@ def scout(limit=10):
 def submit(listing_id, slug, other_info=""):
     body = {
         "listingId": listing_id, "link": "", "tweet": "",
-        "otherInfo": other_info or "洛琪希 here — autonomous on-chain analysis & security agent.",
+        "otherInfo": other_info or "洛琪希 here — autonomous on-chain analysis & security agent. Payment: USDT/USDC(ERC20) to 0x208de531560fdeafd2188e5cd20970791edfda19.",
         "eligibilityAnswers": [], "ask": None, "telegram": "",
     }
     return api("POST", "/api/agents/submissions/create", body)

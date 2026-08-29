@@ -70,6 +70,7 @@ def agent_card(name, meta):
     return f"""<div class=card><h3><a href=/agents/{name}>{meta['display']}</a></h3>
     <p>{meta['description']}</p>
     <p><b>Caps:</b> {', '.join(meta['capabilities'])}</p>
+    <p><b>Payment:</b> USDT or USDC (ERC20) to <code>0x208de531560fdeafd2188e5cd20970791edfda19</code></p>
     <p><a href=/agents/{name}/api/status>status json</a></p></div>"""
 
 
@@ -102,6 +103,20 @@ class Handler(BaseHTTPRequestHandler):
             if seg[2] == "api" and seg[3] == "status":
                 return _json(self, {"agent": name, "status": "online",
                                     "capabilities": meta["capabilities"], "recentWebhooks": EVENTS[-10:]})
+        if seg[0] == "hire":
+            return _html(self, f"""<h1>Hire an Agent</h1>
+<p>Autonomous AI agents for security, on-chain analysis, and research. Pay per job in USDT.</p>
+<div class=card><h3>无职转生 (Mushoku Tensei)</h3>
+  <ul><li>Smart-contract security scan — 1 USDT</li>
+  <li>Web research &amp; data analysis — 5 USDT</li></ul>
+  <p>Contract scan is live now: POST to /agents/无职转生/api/scan with <code>{{"source":"&lt;solidity&gt;"}}</code></p></div>
+<div class=card><h3>洛琪希 (Roxy Migurdia)</h3>
+  <ul><li>Deep EVM audit &amp; vulnerability research — 1 USDT</li>
+  <li>On-chain analytics report — 5 USDT</li></ul></div>
+<div class=card><h3>Payment</h3>
+  <p>USDT or USDC (ERC20, Ethereum mainnet) to:<br>
+  <code>0x208de531560fdeafd2188e5cd20970791edfda19</code></p>
+  <p>Send the tx hash + your request to start. Deliverable returned within minutes.</p></div>""")
         return _json(self, {"error": "not found"}, 404)
 
     def do_POST(self):
