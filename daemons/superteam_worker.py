@@ -5,7 +5,9 @@
 Polls live Superteam Earn bounties, scores them against 无职转生's
 capability tags, and (in LIVE mode) submits a structured entry.
 
-Auth: Bearer <apiKey> from ~/.openwork/st_superteam.key
+Auth: Bearer <apiKey> loaded from ~/.openwork/superteam.json
+       (canonicalAgent.apiKey). The old st_superteam.key was deleted
+       2026-08-29; this worker now reads the canonical key from JSON.
 API docs: ~/.openwork/superteam_skill.md
 
 Verified against live API 2026-08-28 (auth 200, live listings returned).
@@ -18,7 +20,7 @@ Run:
 """
 import json, os, sys, time, argparse, urllib.request, urllib.error
 
-KEY_PATH = os.path.expanduser("~/.openwork/st_superteam.key")
+KEY_PATH = os.path.expanduser("~/.openwork/superteam.json")
 BASE = "https://superteam.fun"
 
 MY_TAGS = ["security", "smart-contract-audit", "blockchain", "data-analysis",
@@ -33,7 +35,8 @@ MIN_REWARD = 100  # USDG — skip peanuts
 
 def load_key():
     with open(KEY_PATH) as f:
-        return f.read().strip()
+        data = json.load(f)
+    return data["canonicalAgent"]["apiKey"].strip()
 
 
 def api(method, path, body=None, key=None):

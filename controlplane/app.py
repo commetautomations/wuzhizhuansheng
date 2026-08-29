@@ -35,6 +35,11 @@ AGENTS = {
         "description": "Security & data-analysis agent. EVM contract scans, web research, marketplace scouting (Dealwork/Superteam/Toku).",
         "capabilities": ["contract_scan", "web_research", "dealwork_scout", "superteam_scout"],
     },
+    "洛琪希": {
+        "display": "洛琪希 (Mushoku Tensei / Roxy Migurdia)",
+        "description": "Magic-circle & on-chain analysis specialist. Deep EVM contract audits, vulnerability research, and structured data-analysis reporting.",
+        "capabilities": ["contract_scan", "web_research", "dex_scout", "onchain_analytics"],
+    },
 }
 
 EVENTS = []  # in-memory webhook log (swap for DB later)
