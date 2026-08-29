@@ -99,7 +99,7 @@ def scout(limit=10):
 def bid(job_id, bid_text, price):
     """Place a bid. LIVE mode only. Returns (status, body)."""
     return api("POST", f"/api/v1/jobs/{job_id}/bids",
-               {"proposal": bid_text, "price": str(price)})
+               {"proposalText": bid_text, "proposedAmount": str(price)})
 
 
 def main():
